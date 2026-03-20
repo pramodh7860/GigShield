@@ -1,8 +1,14 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { workersTable, policiesTable, claimsTable, triggersTable } from "@workspace/db/schema";
-import { eq, desc, ilike, count, sql } from "drizzle-orm";
 import { formatWorker } from "./auth";
+import {
+  claimsCollection,
+  parseNumericId,
+  policiesCollection,
+  sanitizeMongoDoc,
+  toIso,
+  triggersCollection,
+  workersCollection,
+} from "../lib/mongo";
 
 const router = Router();
 
@@ -11,31 +17,33 @@ router.get("/workers", async (req, res) => {
   const limit = parseInt(req.query.limit as string) || 20;
   const offset = parseInt(req.query.offset as string) || 0;
 
-  let workers = await db.select().from(workersTable)
-    .orderBy(desc(workersTable.createdAt))
+  const filter = search
+    ? {
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+        ],
+      }
+    : {};
+
+  const workers = await workersCollection()
+    .find(filter)
+    .sort({ createdAt: -1 })
+    .skip(offset)
     .limit(limit)
-    .offset(offset);
+    .toArray();
 
-  if (search) {
-    workers = workers.filter(w =>
-      w.name.toLowerCase().includes(search.toLowerCase()) ||
-      w.email.toLowerCase().includes(search.toLowerCase())
-    );
-  }
+  const allWorkersCount = await workersCollection().countDocuments(filter);
 
-  const allWorkers = search
-    ? (await db.select().from(workersTable)).filter(w =>
-      w.name.toLowerCase().includes(search.toLowerCase()) ||
-      w.email.toLowerCase().includes(search.toLowerCase())
-    )
-    : await db.select().from(workersTable);
-
-  const workerData = await Promise.all(workers.map(async (w) => {
-    const [activePolicy] = await db.select().from(policiesTable)
-      .where(eq(policiesTable.workerId, w.id))
-      .limit(1);
-    const allClaims = await db.select().from(claimsTable).where(eq(claimsTable.workerId, w.id));
-    const totalPaid = allClaims.filter(c => c.status === "paid").reduce((s, c) => s + c.amount, 0);
+  const workerData = await Promise.all(workers.map(async (w: any) => {
+    const activePolicy = await policiesCollection().findOne({
+      workerId: (w as any).id,
+      status: "active",
+    });
+    const allClaims = await claimsCollection().find({ workerId: (w as any).id }).toArray();
+    const totalPaid = allClaims
+      .filter((c: any) => c.status === "paid")
+      .reduce((s: number, c: any) => s + c.amount, 0);
 
     return {
       ...formatWorker(w),
@@ -45,7 +53,7 @@ router.get("/workers", async (req, res) => {
     };
   }));
 
-  res.json({ workers: workerData, total: allWorkers.length });
+  res.json({ workers: workerData, total: allWorkersCount });
 });
 
 router.get("/claims", async (req, res) => {
@@ -53,78 +61,84 @@ router.get("/claims", async (req, res) => {
   const limit = parseInt(req.query.limit as string) || 20;
   const offset = parseInt(req.query.offset as string) || 0;
 
-  let claims = await db.select({
-    claim: claimsTable,
-    worker: workersTable,
-  })
-    .from(claimsTable)
-    .innerJoin(workersTable, eq(claimsTable.workerId, workersTable.id))
-    .orderBy(desc(claimsTable.createdAt))
+  const filter = status ? { status } : {};
+
+  const claims = await claimsCollection()
+    .find(filter)
+    .sort({ createdAt: -1 })
+    .skip(offset)
     .limit(limit)
-    .offset(offset);
+    .toArray();
 
-  if (status) {
-    claims = claims.filter(({ claim }) => claim.status === status);
-  }
-
-  const all = await db.select().from(claimsTable);
+  const total = await claimsCollection().countDocuments(filter);
+  const workerIds = Array.from(new Set(claims.map((claim: any) => claim.workerId)));
+  const workers = await workersCollection().find({ id: { $in: workerIds } }).toArray();
+  const workersById = new Map<number, any>(workers.map((worker: any) => [worker.id, worker]));
 
   res.json({
-    claims: claims.map(({ claim, worker }) => ({
-      ...claim,
-      createdAt: claim.createdAt.toISOString(),
-      paidAt: claim.paidAt?.toISOString() ?? null,
-      workerName: worker.name,
-      workerEmail: worker.email,
+    claims: claims.map((claim: any) => ({
+      ...sanitizeMongoDoc(claim as Record<string, unknown>),
+      createdAt: toIso(claim.createdAt),
+      paidAt: claim.paidAt ? toIso(claim.paidAt) : null,
+      workerName: workersById.get(claim.workerId)?.name ?? "Unknown",
+      workerEmail: workersById.get(claim.workerId)?.email ?? "Unknown",
       fraudScore: claim.fraudScore,
     })),
-    total: all.length,
+    total,
   });
 });
 
 router.patch("/claims/:id", async (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseNumericId(req.params.id);
   const { status, notes } = req.body;
 
-  const updates: Partial<typeof claimsTable.$inferInsert> = { status };
+  const updates: Record<string, unknown> = { status };
   if (notes) updates.notes = notes;
   if (status === "paid") updates.paidAt = new Date();
 
-  const [claim] = await db.update(claimsTable).set(updates).where(eq(claimsTable.id, id)).returning();
+  const result = await claimsCollection().findOneAndUpdate(
+    { id },
+    { $set: updates },
+    { returnDocument: "after" },
+  );
+
+  const claim = (result as any)?.value ?? result;
   if (!claim) {
     res.status(404).json({ error: "not_found", message: "Claim not found" });
     return;
   }
 
-  const [worker] = await db.select().from(workersTable).where(eq(workersTable.id, claim.workerId));
+  const worker = await workersCollection().findOne({ id: (claim as any).workerId });
 
   res.json({
-    ...claim,
-    createdAt: claim.createdAt.toISOString(),
-    paidAt: claim.paidAt?.toISOString() ?? null,
+    ...sanitizeMongoDoc(claim as Record<string, unknown>),
+    createdAt: toIso((claim as any).createdAt),
+    paidAt: (claim as any).paidAt ? toIso((claim as any).paidAt) : null,
     workerName: worker?.name ?? "Unknown",
     workerEmail: worker?.email ?? "Unknown",
-    fraudScore: claim.fraudScore,
+    fraudScore: (claim as any).fraudScore,
   });
 });
 
 router.get("/overview", async (req, res) => {
-  const allWorkers = await db.select().from(workersTable);
-  const allPolicies = await db.select().from(policiesTable);
-  const allClaims = await db.select().from(claimsTable);
-  const allTriggers = await db.select().from(triggersTable);
+  const allWorkers = await workersCollection().find({}).toArray();
+  const allPolicies = await policiesCollection().find({}).toArray();
+  const allClaims = await claimsCollection().find({}).toArray();
+  const allTriggers = await triggersCollection().find({}).toArray();
 
-  const activeWorkers = allWorkers.filter(w => w.isActive).length;
-  const activePolicies = allPolicies.filter(p => p.status === "active").length;
-  const pendingClaims = allClaims.filter(c => c.status === "pending").length;
-  const totalPayouts = allClaims.filter(c => c.status === "paid").reduce((s, c) => s + c.amount, 0);
+  const activeWorkers = allWorkers.filter((w: any) => w.isActive).length;
+  const activePolicies = allPolicies.filter((p: any) => p.status === "active").length;
+  const pendingClaims = allClaims.filter((c: any) => c.status === "pending").length;
+  const totalPayouts = allClaims
+    .filter((c: any) => c.status === "paid")
+    .reduce((s: number, c: any) => s + c.amount, 0);
 
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const weeklyPayouts = allClaims
-    .filter(c => c.status === "paid" && c.paidAt && c.paidAt > oneWeekAgo)
-    .reduce((s, c) => s + c.amount, 0);
+    .filter((c: any) => c.status === "paid" && c.paidAt && c.paidAt > oneWeekAgo)
+    .reduce((s: number, c: any) => s + c.amount, 0);
 
-  const fraudAlerts = allClaims.filter(c => c.fraudScore > 70).length;
+  const fraudAlerts = allClaims.filter((c: any) => c.fraudScore > 70).length;
 
   const zoneMap = new Map<string, { count: number; payout: number }>();
   for (const trigger of allTriggers) {
@@ -142,15 +156,23 @@ router.get("/overview", async (req, res) => {
   }));
 
   const recentActivity = [
-    ...allClaims.slice(-5).map(c => ({
+    ...allClaims
+      .slice()
+      .sort((a: any, b: any) => new Date(String((b as any).createdAt)).getTime() - new Date(String((a as any).createdAt)).getTime())
+      .slice(0, 5)
+      .map((c: any) => ({
       type: "claim",
       description: `Claim #${c.id} ${c.status} - ₹${c.amount}`,
-      timestamp: c.createdAt.toISOString(),
+      timestamp: toIso((c as any).createdAt),
     })),
-    ...allTriggers.slice(-5).map(t => ({
+    ...allTriggers
+      .slice()
+      .sort((a: any, b: any) => new Date(String((b as any).createdAt)).getTime() - new Date(String((a as any).createdAt)).getTime())
+      .slice(0, 5)
+      .map((t: any) => ({
       type: "trigger",
       description: `${t.type} trigger in ${t.zone} - ${t.affectedWorkers} affected`,
-      timestamp: t.createdAt.toISOString(),
+      timestamp: toIso((t as any).createdAt),
     })),
   ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 10);
 
@@ -172,19 +194,21 @@ router.get("/triggers", async (req, res) => {
   const limit = parseInt(req.query.limit as string) || 20;
   const offset = parseInt(req.query.offset as string) || 0;
 
-  const triggers = await db.select().from(triggersTable)
-    .orderBy(desc(triggersTable.createdAt))
+  const triggers = await triggersCollection()
+    .find({})
+    .sort({ createdAt: -1 })
+    .skip(offset)
     .limit(limit)
-    .offset(offset);
+    .toArray();
 
-  const all = await db.select().from(triggersTable);
+  const total = await triggersCollection().countDocuments({});
 
   res.json({
-    triggers: triggers.map(t => ({
-      ...t,
-      createdAt: t.createdAt.toISOString(),
+    triggers: triggers.map((t: any) => ({
+      ...sanitizeMongoDoc(t as Record<string, unknown>),
+      createdAt: toIso((t as any).createdAt),
     })),
-    total: all.length,
+    total,
   });
 });
 

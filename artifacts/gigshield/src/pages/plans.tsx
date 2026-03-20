@@ -9,7 +9,11 @@ import { Check, ShieldAlert, Lock, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
+const hasValidStripeKey = Boolean(
+  stripePublishableKey && stripePublishableKey !== "pk_test_replace_me",
+);
+const stripePromise = hasValidStripeKey ? loadStripe(stripePublishableKey as string) : null;
 
 async function createPaymentIntent(planId: string, workerId: number, zone: string) {
   const res = await fetch("/api/payments/create-intent", {
@@ -58,11 +62,22 @@ function CheckoutForm({ planName, amount, onSuccess, onCancel }: CheckoutFormPro
     setIsProcessing(true);
     setErrorMessage(null);
 
-    const { error, paymentIntent } = await stripe.confirmPayment({
-      elements,
-      confirmParams: { return_url: window.location.href },
-      redirect: "if_required",
-    });
+    let error: { message?: string } | undefined;
+    let paymentIntent: { id: string; status: string } | undefined;
+
+    try {
+      const result = await stripe.confirmPayment({
+        elements,
+        confirmParams: { return_url: window.location.href },
+        redirect: "if_required",
+      });
+      error = result.error;
+      paymentIntent = result.paymentIntent as { id: string; status: string } | undefined;
+    } catch {
+      setErrorMessage("Stripe failed to initialize. Check your Stripe publishable key and try again.");
+      setIsProcessing(false);
+      return;
+    }
 
     if (error) {
       setErrorMessage(error.message ?? "Payment failed");
@@ -94,7 +109,14 @@ function CheckoutForm({ planName, amount, onSuccess, onCancel }: CheckoutFormPro
       </div>
 
       <div className="bg-muted/30 rounded-xl p-4 border">
-        <PaymentElement options={{ layout: "tabs" }} />
+        <PaymentElement
+          options={{ layout: "tabs" }}
+          onLoadError={() =>
+            setErrorMessage(
+              "Unable to load Stripe payment form. Verify Stripe keys and refresh.",
+            )
+          }
+        />
       </div>
 
       {errorMessage && (
@@ -134,6 +156,12 @@ function CheckoutModal({ planId, workerId, zone, onSuccess, onClose }: CheckoutM
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!hasValidStripeKey) {
+      setError("Stripe publishable key is missing or invalid. Update VITE_STRIPE_PUBLISHABLE_KEY.");
+      setLoading(false);
+      return;
+    }
+
     createPaymentIntent(planId, workerId, zone)
       .then(setIntentData)
       .catch(err => setError(err.message))
@@ -227,6 +255,11 @@ export function Plans() {
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
           Simple weekly premiums. Automatic payouts. Pick the plan that fits your risk appetite.
         </p>
+        {!hasValidStripeKey && (
+          <p className="text-sm text-destructive">
+            Stripe is not configured. Set VITE_STRIPE_PUBLISHABLE_KEY in the frontend .env file.
+          </p>
+        )}
       </div>
 
       {activePolicy && (

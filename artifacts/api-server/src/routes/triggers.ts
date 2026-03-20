@@ -1,7 +1,13 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { triggersTable, claimsTable, policiesTable, workersTable } from "@workspace/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import {
+  claimsCollection,
+  getNextId,
+  policiesCollection,
+  sanitizeMongoDoc,
+  toIso,
+  triggersCollection,
+  workersCollection,
+} from "../lib/mongo";
 
 const router = Router();
 
@@ -16,18 +22,17 @@ router.get("/", async (req, res) => {
   const zone = req.query.zone as string | undefined;
   const limit = parseInt(req.query.limit as string) || 20;
 
-  const query = db.select().from(triggersTable)
-    .orderBy(desc(triggersTable.createdAt))
-    .limit(limit);
-
-  const triggers = zone
-    ? await query.where(eq(triggersTable.zone, zone))
-    : await query;
+  const filter = zone ? { zone } : {};
+  const triggers = await triggersCollection()
+    .find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
 
   res.json({
-    triggers: triggers.map(t => ({
-      ...t,
-      createdAt: t.createdAt.toISOString(),
+    triggers: triggers.map((t: any) => ({
+      ...sanitizeMongoDoc(t as Record<string, unknown>),
+      createdAt: toIso((t as any).createdAt),
     }))
   });
 });
@@ -40,26 +45,30 @@ router.post("/", async (req, res) => {
     return;
   }
 
-  const activePolicies = await db.select({
-    policy: policiesTable,
-    worker: workersTable,
-  })
-    .from(policiesTable)
-    .innerJoin(workersTable, eq(policiesTable.workerId, workersTable.id))
-    .where(and(eq(policiesTable.zone, zone), eq(policiesTable.status, "active")));
+  const activePolicies = await policiesCollection()
+    .find({ zone, status: "active" })
+    .toArray();
+
+  const workerIds = Array.from(new Set(activePolicies.map((policy: any) => policy.workerId)));
+  const workers = await workersCollection().find({ id: { $in: workerIds } }).toArray();
+  const workersById = new Map<number, any>(workers.map((w: any) => [w.id, w]));
 
   const payoutFraction = PAYOUT_BY_SEVERITY[severity] ?? 0.5;
   let totalPayout = 0;
-  const createdClaims = [];
+  const createdClaims: Array<Record<string, unknown>> = [];
 
-  for (const { policy, worker } of activePolicies) {
+  for (const policy of activePolicies as any[]) {
+    const worker = workersById.get(policy.workerId);
+    if (!worker) {
+      continue;
+    }
+
     const amount = Math.round(policy.maxPayoutPerWeek * payoutFraction * 100) / 100;
     const fraudScore = Math.random() * 20;
 
     createdClaims.push({
       workerId: worker.id,
       policyId: policy.id,
-      triggerId: 0,
       amount,
       status: "approved",
       triggerType: type,
@@ -71,7 +80,8 @@ router.post("/", async (req, res) => {
     totalPayout += amount;
   }
 
-  const [trigger] = await db.insert(triggersTable).values({
+  const trigger = {
+    id: await getNextId("triggers"),
     type,
     zone,
     description,
@@ -81,21 +91,30 @@ router.post("/", async (req, res) => {
     orderDropPercent: orderDropPercent ?? null,
     affectedWorkers: createdClaims.length,
     totalPayout,
-  }).returning();
+    createdAt: new Date(),
+  };
+
+  await triggersCollection().insertOne(trigger);
 
   if (createdClaims.length > 0) {
-    const claimsToInsert = createdClaims.map(c => ({ ...c, triggerId: trigger.id, paidAt: new Date() }));
-    const insertedClaims = await db.insert(claimsTable).values(
-      claimsToInsert.map(c => ({ ...c, status: "paid" }))
-    ).returning();
-
-    await db.update(triggersTable)
-      .set({ affectedWorkers: insertedClaims.length })
-      .where(eq(triggersTable.id, trigger.id));
+    const paidAt = new Date();
+    const claimsToInsert = await Promise.all(createdClaims.map(async (claim) => ({
+      ...claim,
+      id: await getNextId("claims"),
+      triggerId: trigger.id,
+      status: "paid",
+      notes: null,
+      createdAt: paidAt,
+      paidAt,
+    })));
+    await claimsCollection().insertMany(claimsToInsert);
   }
 
   res.status(201).json({
-    trigger: { ...trigger, createdAt: trigger.createdAt.toISOString() },
+    trigger: {
+      ...sanitizeMongoDoc(trigger as Record<string, unknown>),
+      createdAt: toIso(trigger.createdAt),
+    },
     claimsCreated: createdClaims.length,
     totalPayout,
   });

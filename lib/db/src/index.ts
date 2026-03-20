@@ -1,16 +1,27 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
-import * as schema from "./schema";
+import { MongoClient } from "mongodb";
 
-const { Pool } = pg;
+const DEFAULT_MONGODB_URI =
+  "mongodb+srv://pramodhkumar782006:pramodh786@cluster0.a0woy.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
+export const MONGODB_URI =
+  process.env.MONGODB_URI ?? process.env.DATABASE_URL ?? DEFAULT_MONGODB_URI;
+export const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME ?? "asset-explorer";
+
+const globalForMongo = globalThis as typeof globalThis & {
+  __workspaceMongoClient?: MongoClient;
+};
+
+export const mongoClient =
+  globalForMongo.__workspaceMongoClient ?? new MongoClient(MONGODB_URI);
+
+if (!globalForMongo.__workspaceMongoClient) {
+  globalForMongo.__workspaceMongoClient = mongoClient;
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool, { schema });
+void mongoClient.connect().catch((error) => {
+  console.error("MongoDB connection error:", error);
+});
 
-export * from "./schema";
+export const db: any = mongoClient.db(MONGODB_DB_NAME);
+
+export * from "./types";

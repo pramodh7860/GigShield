@@ -1,8 +1,12 @@
 import { Router } from "express";
 import Stripe from "stripe";
-import { db } from "@workspace/db";
-import { policiesTable, workersTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import {
+  getNextId,
+  policiesCollection,
+  sanitizeMongoDoc,
+  toIso,
+  workersCollection,
+} from "../lib/mongo";
 
 const router = Router();
 
@@ -32,7 +36,13 @@ router.post("/create-intent", async (req, res) => {
     return;
   }
 
-  const [worker] = await db.select().from(workersTable).where(eq(workersTable.id, workerId));
+  const numericWorkerId = Number.parseInt(String(workerId), 10);
+  if (Number.isNaN(numericWorkerId)) {
+    res.status(400).json({ error: "validation_error", message: "Invalid workerId" });
+    return;
+  }
+
+  const worker = await workersCollection().findOne({ id: numericWorkerId });
   if (!worker) {
     res.status(404).json({ error: "not_found", message: "Worker not found" });
     return;
@@ -45,7 +55,7 @@ router.post("/create-intent", async (req, res) => {
     currency: "inr",
     metadata: {
       planId,
-      workerId: String(workerId),
+      workerId: String(numericWorkerId),
       zone,
       planName: plan.name,
     },
@@ -81,27 +91,36 @@ router.post("/confirm", async (req, res) => {
     return;
   }
 
-  await db.update(policiesTable)
-    .set({ status: "cancelled" })
-    .where(and(eq(policiesTable.workerId, parseInt(workerId)), eq(policiesTable.status, "active")));
+  const numericWorkerId = parseInt(workerId, 10);
 
-  const [policy] = await db.insert(policiesTable).values({
-    workerId: parseInt(workerId),
+  await policiesCollection().updateMany(
+    { workerId: numericWorkerId, status: "active" },
+    { $set: { status: "cancelled" } },
+  );
+
+  const now = new Date();
+  const policy = {
+    id: await getNextId("policies"),
+    workerId: numericWorkerId,
     planId,
     planName,
     status: "active",
     weeklyPremium: plan.weeklyPremium,
     maxPayoutPerWeek: plan.maxPayoutPerWeek,
     zone,
-    startDate: new Date(),
-  }).returning();
+    startDate: now,
+    endDate: null,
+    createdAt: now,
+  };
+
+  await policiesCollection().insertOne(policy);
 
   res.json({
     policy: {
-      ...policy,
-      startDate: policy.startDate.toISOString(),
-      endDate: policy.endDate?.toISOString() ?? null,
-      createdAt: policy.createdAt.toISOString(),
+      ...sanitizeMongoDoc(policy as Record<string, unknown>),
+      startDate: toIso(policy.startDate),
+      endDate: policy.endDate ? toIso(policy.endDate) : null,
+      createdAt: toIso(policy.createdAt),
     },
     paymentIntentId,
   });

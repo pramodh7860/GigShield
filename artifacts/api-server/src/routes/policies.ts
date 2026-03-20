@@ -1,7 +1,11 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { policiesTable } from "@workspace/db/schema";
-import { eq, and } from "drizzle-orm";
+import {
+  getNextId,
+  parseNumericId,
+  policiesCollection,
+  sanitizeMongoDoc,
+  toIso,
+} from "../lib/mongo";
 
 const router = Router();
 
@@ -74,59 +78,75 @@ router.post("/", async (req, res) => {
     return;
   }
 
-  await db.update(policiesTable)
-    .set({ status: "cancelled" })
-    .where(and(eq(policiesTable.workerId, workerId), eq(policiesTable.status, "active")));
+  const numericWorkerId = Number.parseInt(String(workerId), 10);
+  if (Number.isNaN(numericWorkerId)) {
+    res.status(400).json({ error: "validation_error", message: "Invalid workerId" });
+    return;
+  }
 
-  const [policy] = await db.insert(policiesTable).values({
-    workerId,
+  await policiesCollection().updateMany(
+    { workerId: numericWorkerId, status: "active" },
+    { $set: { status: "cancelled" } },
+  );
+
+  const now = new Date();
+  const policy = {
+    id: await getNextId("policies"),
+    workerId: numericWorkerId,
     planId: plan.id,
     planName: plan.name,
     status: "active",
     weeklyPremium: plan.weeklyPremium,
     maxPayoutPerWeek: plan.maxPayoutPerWeek,
     zone,
-    startDate: new Date(),
-  }).returning();
+    startDate: now,
+    endDate: null,
+    createdAt: now,
+  };
+
+  await policiesCollection().insertOne(policy);
 
   res.status(201).json({
-    ...policy,
-    startDate: policy.startDate.toISOString(),
-    endDate: policy.endDate?.toISOString() ?? null,
-    createdAt: policy.createdAt.toISOString(),
+    ...sanitizeMongoDoc(policy as Record<string, unknown>),
+    startDate: toIso(policy.startDate),
+    endDate: policy.endDate ? toIso(policy.endDate) : null,
+    createdAt: toIso(policy.createdAt),
   });
 });
 
 router.get("/:id", async (req, res) => {
-  const id = parseInt(req.params.id);
-  const [policy] = await db.select().from(policiesTable).where(eq(policiesTable.id, id));
+  const id = parseNumericId(req.params.id);
+  const policy = await policiesCollection().findOne({ id });
   if (!policy) {
     res.status(404).json({ error: "not_found", message: "Policy not found" });
     return;
   }
   res.json({
-    ...policy,
-    startDate: policy.startDate.toISOString(),
-    endDate: policy.endDate?.toISOString() ?? null,
-    createdAt: policy.createdAt.toISOString(),
+    ...sanitizeMongoDoc(policy as Record<string, unknown>),
+    startDate: toIso((policy as any).startDate),
+    endDate: (policy as any).endDate ? toIso((policy as any).endDate) : null,
+    createdAt: toIso((policy as any).createdAt),
   });
 });
 
 router.delete("/:id", async (req, res) => {
-  const id = parseInt(req.params.id);
-  const [policy] = await db.update(policiesTable)
-    .set({ status: "cancelled", endDate: new Date() })
-    .where(eq(policiesTable.id, id))
-    .returning();
+  const id = parseNumericId(req.params.id);
+  const result = await policiesCollection().findOneAndUpdate(
+    { id },
+    { $set: { status: "cancelled", endDate: new Date() } },
+    { returnDocument: "after" },
+  );
+
+  const policy = (result as any)?.value ?? result;
   if (!policy) {
     res.status(404).json({ error: "not_found", message: "Policy not found" });
     return;
   }
   res.json({
-    ...policy,
-    startDate: policy.startDate.toISOString(),
-    endDate: policy.endDate?.toISOString() ?? null,
-    createdAt: policy.createdAt.toISOString(),
+    ...sanitizeMongoDoc(policy as Record<string, unknown>),
+    startDate: toIso((policy as any).startDate),
+    endDate: (policy as any).endDate ? toIso((policy as any).endDate) : null,
+    createdAt: toIso((policy as any).createdAt),
   });
 });
 

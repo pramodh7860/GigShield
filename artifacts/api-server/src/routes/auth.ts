@@ -1,8 +1,11 @@
 import { Router } from "express";
-import { db } from "@workspace/db";
-import { workersTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
 import crypto from "crypto";
+import {
+  getNextId,
+  toIso,
+  workersCollection,
+  sanitizeMongoDoc,
+} from "../lib/mongo";
 
 const router = Router();
 
@@ -14,7 +17,24 @@ function generateToken(workerId: number): string {
   return crypto.createHash("sha256").update(`${workerId}:${Date.now()}:gigshield_secret`).digest("hex");
 }
 
-function formatWorker(w: typeof workersTable.$inferSelect) {
+type WorkerDoc = {
+  id: number;
+  name: string;
+  email: string;
+  passwordHash: string;
+  phone: string | null;
+  zone: string;
+  platform: string;
+  trustScore: number;
+  riskScore: number;
+  isActive: boolean;
+  role: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function formatWorker(worker: WorkerDoc) {
+  const w = sanitizeMongoDoc(worker as unknown as Record<string, unknown>) as WorkerDoc;
   return {
     id: w.id,
     name: w.name,
@@ -26,7 +46,7 @@ function formatWorker(w: typeof workersTable.$inferSelect) {
     riskScore: w.riskScore,
     isActive: w.isActive,
     role: w.role,
-    createdAt: w.createdAt.toISOString(),
+    createdAt: toIso(w.createdAt),
   };
 }
 
@@ -40,14 +60,16 @@ router.post("/register", async (req, res) => {
     return;
   }
 
-  const existing = await db.select().from(workersTable).where(eq(workersTable.email, email));
-  if (existing.length > 0) {
+  const existing = await workersCollection().findOne({ email });
+  if (existing) {
     res.status(409).json({ error: "conflict", message: "Email already registered" });
     return;
   }
 
   const riskScore = Math.random() * 30 + 40;
-  const [worker] = await db.insert(workersTable).values({
+  const now = new Date();
+  const worker: WorkerDoc = {
+    id: await getNextId("workers"),
     name,
     email,
     passwordHash: hashPassword(password),
@@ -58,7 +80,11 @@ router.post("/register", async (req, res) => {
     riskScore,
     isActive: true,
     role: "worker",
-  }).returning();
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await workersCollection().insertOne(worker);
 
   const token = generateToken(worker.id);
   tokenStore.set(token, worker.id);
@@ -74,7 +100,7 @@ router.post("/login", async (req, res) => {
     return;
   }
 
-  const [worker] = await db.select().from(workersTable).where(eq(workersTable.email, email));
+  const worker = await workersCollection().findOne({ email });
   if (!worker || worker.passwordHash !== hashPassword(password)) {
     res.status(401).json({ error: "unauthorized", message: "Invalid email or password" });
     return;
@@ -100,7 +126,7 @@ router.get("/me", async (req, res) => {
     return;
   }
 
-  const [worker] = await db.select().from(workersTable).where(eq(workersTable.id, workerId));
+  const worker = await workersCollection().findOne({ id: workerId });
   if (!worker) {
     res.status(401).json({ error: "unauthorized", message: "Worker not found" });
     return;
