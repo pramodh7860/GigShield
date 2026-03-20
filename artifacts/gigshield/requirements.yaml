@@ -1,0 +1,16 @@
+packages:
+  "framer-motion": "For premium page transitions and interactive micro-animations"
+  "recharts": "For the admin risk overview and payout charts"
+  "date-fns": "For formatting claim and policy timestamps elegantly"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility to safely merge Tailwind CSS classes"
+
+images:
+  - path: "artifacts/gigshield/public/images/hero-abstract.png"
+    description: "A clean, modern, abstract 3D illustration of a glowing blue shield protecting a stylized city map, representing insurance coverage for gig workers. Fintech aesthetic, white background with soft shadows."
+    aspect_ratio: "16:9"
+
+notes:
+  - "The app uses standard JWT auth. The token is stored in localStorage and passed in the Authorization header."
+  - "All API calls use the generated fetch functions from @workspace/api-client-react."
+  - "Admin routes are protected on the frontend by checking user.role === 'admin'."

@@ -1,15 +1,26 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: GigShield - Gig Worker Insurance API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: workers
+    description: Worker management
+  - name: policies
+    description: Insurance policies
+  - name: claims
+    description: Claims and payouts
+  - name: triggers
+    description: Disruption trigger events
+  - name: admin
+    description: Admin operations
 paths:
   /healthz:
     get:
@@ -24,6 +35,511 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/register:
+    post:
+      operationId: registerWorker
+      tags: [auth]
+      summary: Register a new gig worker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Worker registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: loginWorker
+      tags: [auth]
+      summary: Login a worker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/me:
+    get:
+      operationId: getCurrentWorker
+      tags: [auth]
+      summary: Get current authenticated worker
+      responses:
+        "200":
+          description: Current worker profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /workers/{id}:
+    get:
+      operationId: getWorker
+      tags: [workers]
+      summary: Get a worker by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Worker found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "404":
+          description: Worker not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateWorker
+      tags: [workers]
+      summary: Update a worker profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkerRequest"
+      responses:
+        "200":
+          description: Worker updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+
+  /workers/{id}/dashboard:
+    get:
+      operationId: getWorkerDashboard
+      tags: [workers]
+      summary: Get worker dashboard data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardData"
+
+  /policies:
+    get:
+      operationId: listPolicies
+      tags: [policies]
+      summary: List available insurance plans
+      responses:
+        "200":
+          description: List of available plans
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plan"
+                required:
+                  - plans
+    post:
+      operationId: createPolicy
+      tags: [policies]
+      summary: Subscribe to an insurance plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePolicyRequest"
+      responses:
+        "201":
+          description: Policy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Policy"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /policies/{id}:
+    get:
+      operationId: getPolicy
+      tags: [policies]
+      summary: Get a specific policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Policy found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Policy"
+    delete:
+      operationId: cancelPolicy
+      tags: [policies]
+      summary: Cancel a policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Policy cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Policy"
+
+  /workers/{workerId}/policies:
+    get:
+      operationId: getWorkerPolicies
+      tags: [policies]
+      summary: Get all policies for a worker
+      parameters:
+        - name: workerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Worker policies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Policy"
+                required:
+                  - policies
+
+  /claims:
+    get:
+      operationId: listClaims
+      tags: [claims]
+      summary: List claims
+      parameters:
+        - name: workerId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, paid]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: List of claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claims:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Claim"
+                  total:
+                    type: integer
+                required:
+                  - claims
+                  - total
+
+  /claims/{id}:
+    get:
+      operationId: getClaim
+      tags: [claims]
+      summary: Get a specific claim
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Claim found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+
+  /triggers:
+    get:
+      operationId: listTriggers
+      tags: [triggers]
+      summary: List recent trigger events
+      parameters:
+        - name: zone
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of triggers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  triggers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TriggerEvent"
+                required:
+                  - triggers
+    post:
+      operationId: createTrigger
+      tags: [triggers]
+      summary: Create a trigger event (system/admin use)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTriggerRequest"
+      responses:
+        "201":
+          description: Trigger created and claims processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerResult"
+
+  /admin/workers:
+    get:
+      operationId: adminListWorkers
+      tags: [admin]
+      summary: Admin - list all workers
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Workers list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkerAdmin"
+                  total:
+                    type: integer
+                required:
+                  - workers
+                  - total
+
+  /admin/claims:
+    get:
+      operationId: adminListClaims
+      tags: [admin]
+      summary: Admin - list all claims
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Claims list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claims:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ClaimAdmin"
+                  total:
+                    type: integer
+                required:
+                  - claims
+                  - total
+
+  /admin/claims/{id}:
+    patch:
+      operationId: adminUpdateClaim
+      tags: [admin]
+      summary: Admin - update claim status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateClaimRequest"
+      responses:
+        "200":
+          description: Claim updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimAdmin"
+
+  /admin/overview:
+    get:
+      operationId: adminGetOverview
+      tags: [admin]
+      summary: Admin - get risk overview and stats
+      responses:
+        "200":
+          description: Overview stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOverview"
+
+  /admin/triggers:
+    get:
+      operationId: adminListTriggers
+      tags: [admin]
+      summary: Admin - list all triggers
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Triggers list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  triggers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TriggerEvent"
+                  total:
+                    type: integer
+                required:
+                  - triggers
+                  - total
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +550,481 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
+
+    RegisterRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+        phone:
+          type: string
+        zone:
+          type: string
+        platform:
+          type: string
+          enum: [zomato, swiggy, ubereats, dunzo, other]
+      required:
+        - name
+        - email
+        - password
+        - zone
+        - platform
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        worker:
+          $ref: "#/components/schemas/Worker"
+      required:
+        - token
+        - worker
+
+    Worker:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        zone:
+          type: string
+        platform:
+          type: string
+        trustScore:
+          type: number
+          format: float
+        riskScore:
+          type: number
+          format: float
+        isActive:
+          type: boolean
+        role:
+          type: string
+          enum: [worker, admin]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - email
+        - zone
+        - platform
+        - trustScore
+        - riskScore
+        - isActive
+        - role
+        - createdAt
+
+    WorkerAdmin:
+      allOf:
+        - $ref: "#/components/schemas/Worker"
+        - type: object
+          properties:
+            activePolicyId:
+              type: integer
+              nullable: true
+            totalClaims:
+              type: integer
+            totalPaid:
+              type: number
+              format: float
+          required:
+            - totalClaims
+            - totalPaid
+
+    UpdateWorkerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        zone:
+          type: string
+        platform:
+          type: string
+
+    Plan:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        weeklyPremium:
+          type: number
+          format: float
+        maxPayoutPerWeek:
+          type: number
+          format: float
+        coverageTypes:
+          type: array
+          items:
+            type: string
+        features:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - name
+        - description
+        - weeklyPremium
+        - maxPayoutPerWeek
+        - coverageTypes
+        - features
+
+    Policy:
+      type: object
+      properties:
+        id:
+          type: integer
+        workerId:
+          type: integer
+        planId:
+          type: string
+        planName:
+          type: string
+        status:
+          type: string
+          enum: [active, expired, cancelled]
+        weeklyPremium:
+          type: number
+          format: float
+        maxPayoutPerWeek:
+          type: number
+          format: float
+        zone:
+          type: string
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - workerId
+        - planId
+        - planName
+        - status
+        - weeklyPremium
+        - maxPayoutPerWeek
+        - zone
+        - startDate
+        - createdAt
+
+    CreatePolicyRequest:
+      type: object
+      properties:
+        workerId:
+          type: integer
+        planId:
+          type: string
+        zone:
+          type: string
+      required:
+        - workerId
+        - planId
+        - zone
+
+    Claim:
+      type: object
+      properties:
+        id:
+          type: integer
+        workerId:
+          type: integer
+        policyId:
+          type: integer
+        triggerId:
+          type: integer
+        amount:
+          type: number
+          format: float
+        status:
+          type: string
+          enum: [pending, approved, rejected, paid]
+        triggerType:
+          type: string
+        triggerDescription:
+          type: string
+        zone:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - workerId
+        - policyId
+        - triggerId
+        - amount
+        - status
+        - triggerType
+        - triggerDescription
+        - zone
+        - createdAt
+
+    ClaimAdmin:
+      allOf:
+        - $ref: "#/components/schemas/Claim"
+        - type: object
+          properties:
+            workerName:
+              type: string
+            workerEmail:
+              type: string
+            fraudScore:
+              type: number
+              format: float
+          required:
+            - workerName
+            - workerEmail
+            - fraudScore
+
+    TriggerEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [rain, heat, curfew, platform_outage, flood, storm]
+        zone:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        rainfallMm:
+          type: number
+          format: float
+          nullable: true
+        temperatureCelsius:
+          type: number
+          format: float
+          nullable: true
+        orderDropPercent:
+          type: number
+          format: float
+          nullable: true
+        affectedWorkers:
+          type: integer
+        totalPayout:
+          type: number
+          format: float
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - type
+        - zone
+        - description
+        - severity
+        - affectedWorkers
+        - totalPayout
+        - createdAt
+
+    CreateTriggerRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [rain, heat, curfew, platform_outage, flood, storm]
+        zone:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        rainfallMm:
+          type: number
+          format: float
+        temperatureCelsius:
+          type: number
+          format: float
+        orderDropPercent:
+          type: number
+          format: float
+      required:
+        - type
+        - zone
+        - description
+        - severity
+
+    TriggerResult:
+      type: object
+      properties:
+        trigger:
+          $ref: "#/components/schemas/TriggerEvent"
+        claimsCreated:
+          type: integer
+        totalPayout:
+          type: number
+          format: float
+      required:
+        - trigger
+        - claimsCreated
+        - totalPayout
+
+    AdminUpdateClaimRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, approved, rejected, paid]
+        notes:
+          type: string
+      required:
+        - status
+
+    DashboardData:
+      type: object
+      properties:
+        worker:
+          $ref: "#/components/schemas/Worker"
+        activePolicy:
+          $ref: "#/components/schemas/Policy"
+          nullable: true
+        recentClaims:
+          type: array
+          items:
+            $ref: "#/components/schemas/Claim"
+        totalEarningsProtected:
+          type: number
+          format: float
+        totalClaims:
+          type: integer
+        totalPaid:
+          type: number
+          format: float
+        recentTriggers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TriggerEvent"
+        coverageStatus:
+          type: string
+          enum: [active, inactive, pending]
+      required:
+        - worker
+        - recentClaims
+        - totalEarningsProtected
+        - totalClaims
+        - totalPaid
+        - recentTriggers
+        - coverageStatus
+
+    AdminOverview:
+      type: object
+      properties:
+        totalWorkers:
+          type: integer
+        activeWorkers:
+          type: integer
+        activePolicies:
+          type: integer
+        totalClaims:
+          type: integer
+        pendingClaims:
+          type: integer
+        totalPayouts:
+          type: number
+          format: float
+        weeklyPayouts:
+          type: number
+          format: float
+        fraudAlerts:
+          type: integer
+        triggersByZone:
+          type: array
+          items:
+            type: object
+            properties:
+              zone:
+                type: string
+              count:
+                type: integer
+              payout:
+                type: number
+                format: float
+            required:
+              - zone
+              - count
+              - payout
+        recentActivity:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              description:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+            required:
+              - type
+              - description
+              - timestamp
+      required:
+        - totalWorkers
+        - activeWorkers
+        - activePolicies
+        - totalClaims
+        - pendingClaims
+        - totalPayouts
+        - weeklyPayouts
+        - fraudAlerts
+        - triggersByZone
+        - recentActivity

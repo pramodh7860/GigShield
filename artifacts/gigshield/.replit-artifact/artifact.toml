@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "GigShield - Gig Worker Insurance"
+version = "1.0.0"
+id = "artifacts/gigshield"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19225
+
+[services.development]
+run = "pnpm --filter @workspace/gigshield run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/gigshield", "run", "build" ]
+publicDir = "artifacts/gigshield/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19225"
+BASE_PATH = "/"
