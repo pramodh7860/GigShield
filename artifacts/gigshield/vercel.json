@@ -1,0 +1,13 @@
+{
+  "buildCommand": "pnpm run build",
+  "outputDirectory": "dist",
+  "env": {
+    "VITE_STRIPE_PUBLISHABLE_KEY": "@vite_stripe_publishable_key"
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "${{ VITE_API_URL }}/api/:path*"
+    }
+  ]
+}
