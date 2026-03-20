@@ -6,6 +6,7 @@ import policiesRouter from "./policies";
 import claimsRouter from "./claims";
 import triggersRouter from "./triggers";
 import adminRouter from "./admin";
+import paymentsRouter from "./payments";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use("/policies", policiesRouter);
 router.use("/claims", claimsRouter);
 router.use("/triggers", triggersRouter);
 router.use("/admin", adminRouter);
+router.use("/payments", paymentsRouter);
 
 export default router;
