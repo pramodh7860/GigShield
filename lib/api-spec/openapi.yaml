@@ -578,7 +578,7 @@ components:
           type: string
         platform:
           type: string
-          enum: [zomato, swiggy, ubereats, dunzo, other]
+          enum: [zomato, swiggy, amazon, flipkart, zepto, blinkit, dunzo, porter, other]
       required:
         - name
         - email

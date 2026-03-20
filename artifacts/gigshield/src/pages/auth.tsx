@@ -79,7 +79,7 @@ const registerSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
   phone: z.string().min(10, "Phone number required"),
   zone: z.string().min(2, "Operating zone is required"),
-  platform: z.enum(["zomato", "swiggy", "ubereats", "dunzo", "other"]),
+  platform: z.enum(["zomato", "swiggy", "amazon", "flipkart", "zepto", "blinkit", "dunzo", "porter", "other"]),
 });
 
 export function Register() {
@@ -149,10 +149,22 @@ export function Register() {
                   className="flex h-12 w-full rounded-xl border border-input bg-background px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   {...form.register("platform")}
                 >
-                  <option value="zomato">Zomato</option>
-                  <option value="swiggy">Swiggy</option>
-                  <option value="ubereats">Uber Eats</option>
-                  <option value="dunzo">Dunzo</option>
+                  <optgroup label="🍔 Food Delivery">
+                    <option value="zomato">Zomato</option>
+                    <option value="swiggy">Swiggy</option>
+                  </optgroup>
+                  <optgroup label="📦 E-commerce">
+                    <option value="amazon">Amazon Flex</option>
+                    <option value="flipkart">Flipkart</option>
+                  </optgroup>
+                  <optgroup label="⚡ Quick Commerce">
+                    <option value="zepto">Zepto</option>
+                    <option value="blinkit">Blinkit</option>
+                  </optgroup>
+                  <optgroup label="🚚 Logistics">
+                    <option value="dunzo">Dunzo</option>
+                    <option value="porter">Porter</option>
+                  </optgroup>
                   <option value="other">Other</option>
                 </select>
               </div>
